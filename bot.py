@@ -22,9 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === Настройки webhook ===
-# На Render: WEBHOOK_HOST = https://твой-сервис.onrender.com
-# Локально: WEBHOOK_HOST = http://localhost
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "http://localhost")
+# На Render: RENDER_EXTERNAL_URL подставляется автоматически
+# Или задай WEBHOOK_HOST вручную в env
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST") or os.getenv("RENDER_EXTERNAL_URL") or "http://localhost"
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -35,14 +35,20 @@ WEBAPP_PORT = int(os.getenv("PORT", 8080))
 
 async def on_startup(bot: Bot):
     """Устанавливает webhook при старте."""
-    await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
-    logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    try:
+        await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+        logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка установки webhook: {e}")
 
 
 async def on_shutdown(bot: Bot):
     """Удаляет webhook при остановке."""
-    await bot.delete_webhook()
-    logger.info("❌ Webhook удалён")
+    try:
+        await bot.delete_webhook()
+        logger.info("❌ Webhook удалён")
+    except Exception as e:
+        logger.error(f"Ошибка удаления webhook: {e}")
 
 
 async def health_check(request):
@@ -54,6 +60,10 @@ async def main():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN не найден в .env!")
         return
+
+    logger.info(f"🌐 WEBHOOK_HOST: {WEBHOOK_HOST}")
+    logger.info(f"🔗 WEBHOOK_URL: {WEBHOOK_URL}")
+    logger.info(f"🚪 PORT: {WEBAPP_PORT}")
 
     # Инициализация БД
     await init_db()
@@ -78,7 +88,7 @@ async def main():
     # Создаём aiohttp-приложение
     app = web.Application()
 
-    # /health — для Render
+    # / и /health — для Render и cron-job
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
 
@@ -89,13 +99,13 @@ async def main():
     # Настройка приложения
     setup_application(app, dp, bot=bot)
 
-    logger.info(f"🚀 Бот запущен на порту {WEBAPP_PORT}")
-
     # Запуск веб-сервера
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, WEBAPP_HOST, WEBAPP_PORT)
     await site.start()
+
+    logger.info(f"🚀 Бот запущен на порту {WEBAPP_PORT}")
 
     # Держим сервер запущенным
     await asyncio.Event().wait()
