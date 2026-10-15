@@ -33,7 +33,6 @@ async def handle_voice(message: Message):
         await message.answer(t("banned", lang))
         return
 
-    # Проверка лимита
     if not is_admin and not is_premium:
         left = await get_questions_left(user_id)
         if left <= 0:
@@ -42,17 +41,14 @@ async def handle_voice(message: Message):
             )
             return
 
-    # Сообщаем что обрабатываем
     processing_msg = await message.answer(t("voice_processing", lang))
 
-    # Скачиваем голосовое
     file = await message.bot.get_file(message.voice.file_id)
     tmp_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}.ogg")
     await message.bot.download_file(file.file_path, tmp_path)
 
-    # Транскрибируем
     try:
-        transcribed_text = await transcribe_voice(tmp_path)
+        transcribed_text = await transcribe_voice(tmp_path, lang=lang)
     except Exception as e:
         logger.error(f"Voice transcribe error: {e}")
         await processing_msg.edit_text(t("voice_error", lang))
@@ -67,10 +63,9 @@ async def handle_voice(message: Message):
         await processing_msg.edit_text(t("voice_error", lang))
         return
 
-    # Показываем расшифровку
     await processing_msg.edit_text(f"🎙 _{transcribed_text}_", parse_mode="Markdown")
 
-    # === Проверка: не просит ли юзер погоду ===
+    # Проверка: погода
     text_lower = transcribed_text.lower()
     weather_keywords = ["weather", "погода", "погоду", "погод", "температура", "temperature"]
     is_weather_query = any(kw in text_lower for kw in weather_keywords)
@@ -80,7 +75,6 @@ async def handle_voice(message: Message):
         from handlers.user import _extract_city
 
         city = _extract_city(transcribed_text)
-
         if city:
             w = await get_weather(city)
             if w:
@@ -95,11 +89,10 @@ async def handle_voice(message: Message):
                 )
                 return
 
-    # === Обычный запрос к ИИ ===
     await message.bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        answer = await ask_ai(transcribed_text)
+        answer = await ask_ai(transcribed_text, lang=lang)
     except Exception as e:
         logger.error(f"Groq error: {e}")
         await message.answer(t("error_generic", lang))

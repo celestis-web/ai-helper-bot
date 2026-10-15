@@ -327,7 +327,7 @@ async def handle_text(message: Message):
                 return
 
     try:
-        answer = await ask_ai(message.text)
+        answer = await ask_ai(message.text, lang=lang)
     except Exception:
         await message.answer(t("error_generic", lang))
         return
