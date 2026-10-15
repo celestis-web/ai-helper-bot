@@ -14,6 +14,7 @@ from keyboards.user_kb import (
 from services.i18n import t
 from services.referral_service import parse_referral_param
 from services.groq_service import ask_ai
+from services.memory import clear_history
 
 router = Router()
 
@@ -78,6 +79,18 @@ async def cmd_help(message: Message):
         t("menu", lang),
         reply_markup=main_menu_kb(lang),
     )
+
+
+@router.message(Command("reset"))
+async def cmd_reset(message: Message):
+    clear_history(message.from_user.id)
+    lang = await get_language(message.from_user.id)
+    texts = {
+        "en": "🧹 Context cleared. Starting fresh.",
+        "ru": "🧹 Контекст очищен. Начинаем с чистого листа.",
+        "uk": "🧹 Контекст очищено. Починаємо з чистого аркуша.",
+    }
+    await message.answer(texts.get(lang, texts["en"]))
 
 
 @router.message(Command("admin"))
@@ -187,9 +200,9 @@ async def cb_referral(callback: CallbackQuery):
 async def cb_help(callback: CallbackQuery):
     lang = await get_language(callback.from_user.id)
     text = {
-        "en": "💬 Just send me a message and I'll reply.\n\nCommands:\n/menu — menu\n/admin — admin (owner only)",
-        "ru": "💬 Просто напиши мне сообщение — я отвечу.\n\nКоманды:\n/menu — меню\n/admin — админка (только владелец)",
-        "uk": "💬 Просто надішли мені повідомлення — я відповім.\n\nКоманди:\n/menu — меню\n/admin — адмінка (тільки власник)",
+        "en": "💬 Just send me a message and I'll reply.\n\nCommands:\n/menu — menu\n/reset — clear context\n/admin — admin (owner only)",
+        "ru": "💬 Просто напиши мне сообщение — я отвечу.\n\nКоманды:\n/menu — меню\n/reset — очистить контекст\n/admin — админка (только владелец)",
+        "uk": "💬 Просто надішли мені повідомлення — я відповім.\n\nКоманди:\n/menu — меню\n/reset — очистити контекст\n/admin — адмінка (тільки власник)",
     }
     await callback.message.edit_text(text.get(lang, text["en"]), reply_markup=back_to_menu_kb(lang))
     await callback.answer()
@@ -327,7 +340,7 @@ async def handle_text(message: Message):
                 return
 
     try:
-        answer = await ask_ai(message.text, lang=lang)
+        answer = await ask_ai(message.text, user_id=user_id, lang=lang)
     except Exception:
         await message.answer(t("error_generic", lang))
         return
@@ -343,7 +356,6 @@ async def handle_text(message: Message):
 
 
 def _extract_city(text: str) -> str | None:
-    """Вытаскивает название города из текста."""
     import re
 
     cleaned = text.lower()
