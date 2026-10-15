@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import ADMIN_ID
+from config import ADMIN_IDS
 from database import (
     get_stats, get_all_user_ids, get_user, set_premium,
     remove_premium, ban_user, unban_user, get_referral_top,
@@ -16,9 +16,9 @@ from keyboards.admin_kb import (
 
 router = Router()
 
-# Проверка на админа для всего роутера
-router.message.filter(F.from_user.id == ADMIN_ID)
-router.callback_query.filter(F.from_user.id == ADMIN_ID)
+# Проверка на админа для всего роутера (мультиадмин)
+router.message.filter(F.from_user.id.in_(ADMIN_IDS))
+router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
 
 
 class BroadcastState(StatesGroup):
@@ -62,7 +62,7 @@ async def cb_users(callback: CallbackQuery):
 
 @router.message(F.text.regexp(r"^\d+$"))
 async def handle_user_id(message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     user_id = int(message.text)
@@ -101,7 +101,6 @@ async def cb_give_premium(callback: CallbackQuery):
     user_id = int(callback.data.replace("admin_give_premium_", ""))
     await set_premium(user_id, days=30)
     await callback.answer("✅ Premium given!", show_alert=True)
-    # обновляем клавиатуру
     user = await get_user(user_id)
     await callback.message.edit_reply_markup(
         reply_markup=admin_user_actions_kb(user_id, 1, int(bool(user[10])))
