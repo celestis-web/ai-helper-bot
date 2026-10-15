@@ -7,16 +7,20 @@ logger = logging.getLogger(__name__)
 client = AsyncGroq(api_key=GROQ_API_KEY)
 
 
-SYSTEM_PROMPTS = {
-    "en": "You are a helpful assistant. Answer concisely in English.",
-    "ru": "Ты полезный ассистент. Отвечай кратко на русском языке.",
-    "uk": "Ти корисний асистент. Відповідай стисло українською мовою.",
-}
-
-
 async def ask_ai(user_message: str, lang: str = "en", model: str = None) -> str:
-    """Отправляет вопрос в Groq. lang: 'en', 'ru', 'uk' — язык ответа."""
-    system_prompt = SYSTEM_PROMPTS.get(lang, SYSTEM_PROMPTS["en"])
+    """
+    Отправляет вопрос в Groq.
+    ИИ отвечает ВСЕГДА на языке сообщения пользователя.
+    lang — резервный язык, если сообщение непонятно.
+    """
+    system_prompt = (
+        "You are a helpful assistant. "
+        "IMPORTANT: Always respond in the SAME LANGUAGE as the user's message. "
+        "If the user writes in Russian — answer in Russian. "
+        "If in Ukrainian — answer in Ukrainian. "
+        "If in English — answer in English. "
+        "Never mix languages. Be concise."
+    )
 
     try:
         response = await client.chat.completions.create(
@@ -36,8 +40,8 @@ async def ask_ai(user_message: str, lang: str = "en", model: str = None) -> str:
 
 async def transcribe_voice(file_path: str, lang: str = "en") -> str:
     """Транскрибирует голосовое через Groq Whisper."""
-    # Whisper принимает ISO-639-1 коды
-    whisper_lang = {"en": "en", "ru": "ru", "uk": "uk"}.get(lang, "en")
+    # Whisper — на русский для русских, на украинский для украинских
+    whisper_lang = {"en": "en", "ru": "ru", "uk": "uk"}.get(lang, "ru")
 
     try:
         with open(file_path, "rb") as f:
@@ -49,4 +53,4 @@ async def transcribe_voice(file_path: str, lang: str = "en") -> str:
         return response.text
     except Exception as e:
         logger.error(f"Whisper error: {type(e).__name__}: {e}")
-        raiseы
+        raise
