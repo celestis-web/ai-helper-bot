@@ -7,10 +7,7 @@ def build_referral_link(bot_username: str, user_id: int) -> str:
 
 
 def parse_referral_param(start_param: str):
-    """
-    Извлекает ID реферера из параметра 'ref_12345'.
-    Возвращает None, если параметр невалидный.
-    """
+    """Извлекает ID реферера из параметра 'ref_12345'."""
     if not start_param or not start_param.startswith("ref_"):
         return None
     try:
@@ -19,6 +16,6 @@ def parse_referral_param(start_param: str):
         return None
 
 
-def is_premium_earned(referrals_count: int) -> bool:ыыы
+def is_premium_earned(referrals_count: int) -> bool:
     """Проверяет, заработал ли юзер премиум за рефералов."""
     return referrals_count >= REFERRAL_PREMIUM_THRESHOLD
