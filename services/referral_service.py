@@ -19,6 +19,6 @@ def parse_referral_param(start_param: str):
         return None
 
 
-def is_premium_earned(referrals_count: int) -> bool:
+def is_premium_earned(referrals_count: int) -> bool:ыыы
     """Проверяет, заработал ли юзер премиум за рефералов."""
     return referrals_count >= REFERRAL_PREMIUM_THRESHOLD
