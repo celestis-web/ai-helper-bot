@@ -1,10 +1,10 @@
+import asyncio
 import httpx
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-# Словарь популярных городов (русское/украинское → английское)
 CITY_TRANSLATIONS = {
     "киев": "Kyiv", "києв": "Kyiv", "киевe": "Kyiv", "kyiv": "Kyiv",
     "москва": "Moscow", "moscow": "Moscow",
@@ -43,13 +43,13 @@ async def get_coordinates(city: str, country_hint: str = None) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(url, params=params)
+            r.raise_for_status()
             data = r.json()
 
         results = data.get("results", [])
         if not results:
             return None
 
-        # Для Киева — приоритет Украины
         if city_lower in ["киев", "києв", "kyiv", "kiev"]:
             for res in results:
                 if res.get("country_code") == "UA":
@@ -60,7 +60,6 @@ async def get_coordinates(city: str, country_hint: str = None) -> dict | None:
                         "longitude": res.get("longitude"),
                     }
 
-        # Если есть подсказка по стране — фильтруем
         if country_hint:
             for res in results:
                 if country_hint.lower() in (res.get("country", "") or "").lower():
@@ -71,7 +70,6 @@ async def get_coordinates(city: str, country_hint: str = None) -> dict | None:
                         "longitude": res.get("longitude"),
                     }
 
-        # Иначе — первый результат
         result = results[0]
         return {
             "name": result.get("name"),
@@ -84,16 +82,12 @@ async def get_coordinates(city: str, country_hint: str = None) -> dict | None:
         return None
 
 
-async def get_weather(city: str) -> dict | None:
-    """Получает текущую погоду для города."""
-    coords = await get_coordinates(city)
-    if not coords:
-        return None
-
+async def _fetch_weather_open_meteo(lat: float, lon: float) -> dict | None:
+    """Один запрос к Open-Meteo. Возвращает None если данных нет."""
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
-        "latitude": coords["latitude"],
-        "longitude": coords["longitude"],
+        "latitude": lat,
+        "longitude": lon,
         "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
         "timezone": "auto",
     }
@@ -101,13 +95,19 @@ async def get_weather(city: str) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(url, params=params)
+            r.raise_for_status()
             data = r.json()
 
         current = data.get("current", {})
+        temp = current.get("temperature_2m")
+
+        # Ключевая проверка: если температуры нет — считаем запрос неудачным
+        if temp is None:
+            logger.warning(f"Open-Meteo returned no temperature for {lat},{lon}")
+            return None
+
         return {
-            "city": coords["name"],
-            "country": coords["country"],
-            "temperature": current.get("temperature_2m"),
+            "temperature": temp,
             "feels_like": current.get("apparent_temperature"),
             "humidity": current.get("relative_humidity_2m"),
             "wind": current.get("wind_speed_10m"),
@@ -115,8 +115,78 @@ async def get_weather(city: str) -> dict | None:
             "description": _weather_code_to_text(current.get("weather_code")),
         }
     except Exception as e:
-        logger.error(f"Weather error: {e}")
+        logger.error(f"Open-Meteo error: {e}")
         return None
+
+
+async def _fetch_weather_wttr(city: str) -> dict | None:
+    """Fallback: wttr.in — другой бесплатный API."""
+    url = f"https://wttr.in/{city}"
+    params = {"format": "j1"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, params=params, headers={"User-Agent": "curl/8.0"})
+            r.raise_for_status()
+            data = r.json()
+
+        current = data.get("current_condition", [{}])[0]
+        if not current:
+            return None
+
+        temp = current.get("temp_C")
+        if temp is None:
+            return None
+
+        # wttr отдаёт строки, конвертим в числа
+        def to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        return {
+            "temperature": to_float(temp),
+            "feels_like": to_float(current.get("FeelsLikeC")),
+            "humidity": to_float(current.get("humidity")),
+            "wind": to_float(current.get("windspeedKmph")),
+            "code": None,
+            "description": current.get("weatherDesc", [{}])[0].get("value", "Unknown"),
+        }
+    except Exception as e:
+        logger.error(f"wttr.in error: {e}")
+        return None
+
+
+async def get_weather(city: str) -> dict | None:
+    """Получает погоду. Пробует Open-Meteo с retry, потом wttr.in."""
+    coords = await get_coordinates(city)
+    if not coords:
+        return None
+
+    # Пробуем Open-Meteo 2 раза с паузой
+    for attempt in range(2):
+        data = await _fetch_weather_open_meteo(coords["latitude"], coords["longitude"])
+        if data:
+            return {
+                "city": coords["name"],
+                "country": coords["country"],
+                **data,
+            }
+        if attempt == 0:
+            await asyncio.sleep(1)
+
+    # Fallback на wttr.in
+    logger.info(f"Open-Meteo failed for {city}, trying wttr.in...")
+    data = await _fetch_weather_wttr(coords["name"])
+    if data:
+        return {
+            "city": coords["name"],
+            "country": coords["country"],
+            **data,
+        }
+
+    return None
 
 
 def _weather_code_to_text(code: int) -> str:
@@ -154,11 +224,14 @@ def format_weather(w: dict, lang: str = "en") -> str:
     }
     L = labels.get(lang, labels["en"])
 
+    def fmt(v, suffix=""):
+        return f"{v}{suffix}" if v is not None else "—"
+
     return (
         f"{titles.get(lang, titles['en'])}\n\n"
-        f"🌡 {L['temp']}: {w['temperature']}°C\n"
-        f"🤔 {L['feels']}: {w['feels_like']}°C\n"
-        f"💧 {L['humidity']}: {w['humidity']}%\n"
-        f"💨 {L['wind']}: {w['wind']} km/h\n"
-        f"☁️ {L['cond']}: {w['description']}"
+        f"🌡 {L['temp']}: {fmt(w['temperature'], '°C')}\n"
+        f"🤔 {L['feels']}: {fmt(w['feels_like'], '°C')}\n"
+        f"💧 {L['humidity']}: {fmt(w['humidity'], '%')}\n"
+        f"💨 {L['wind']}: {fmt(w['wind'], ' km/h')}\n"
+        f"☁️ {L['cond']}: {w.get('description') or '—'}"
     )
